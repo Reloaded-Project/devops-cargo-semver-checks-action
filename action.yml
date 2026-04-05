@@ -1,0 +1,426 @@
+name: "Cargo Semver Checks"
+description: "Runs cargo-semver-checks with rust-cache and optional unpublished-crate filtering"
+branding:
+  icon: "check-circle"
+  color: "green"
+
+inputs:
+  # ── Wrapper-specific ────────────────────────────────────────
+  skip-unpublished:
+    description: >-
+      Skip packages that are not published on crates.io. Ignored when an
+      explicit baseline is provided.
+    required: false
+    default: "true"
+  filter-only:
+    description: "Resolve and filter packages without running upstream semver"
+    required: false
+    default: "false"
+
+  # ── Checkout (actions/checkout@v6) ─────────────────────────
+  use-checkout:
+    description: "Run actions/checkout before semver checks"
+    required: false
+    default: "true"
+  checkout-repository:
+    description: >-
+      Repository name with owner. For example, actions/checkout.
+    required: false
+    default: ${{ github.repository }}
+  checkout-ref:
+    description: >-
+      Branch, tag or SHA to checkout. Defaults to the reference or SHA for the
+      triggering event, otherwise the default branch.
+    required: false
+    default: ""
+  checkout-token:
+    description: >-
+      Personal access token used to fetch the repository. Configured with the
+      local git config so authenticated git commands work. The post-job step
+      removes the PAT.
+    required: false
+    default: ${{ github.token }}
+  checkout-ssh-key:
+    description: >-
+      SSH key used to fetch the repository. Configured with the local git
+      config so authenticated git commands work. The post-job step removes the
+      SSH key.
+    required: false
+    default: ""
+  checkout-ssh-known-hosts:
+    description: >-
+      Known hosts in addition to the user and global host key database. Obtain
+      public SSH keys for a host with ssh-keyscan, e.g. ssh-keyscan github.com.
+      The public key for github.com is always implicitly added.
+    required: false
+    default: ""
+  checkout-ssh-strict:
+    description: >-
+      Whether to perform strict host key checking. When true, adds
+      StrictHostKeyChecking=yes and CheckHostIP=no to the SSH command line.
+    required: false
+    default: "true"
+  checkout-ssh-user:
+    description: "The user to use when connecting to the remote SSH host."
+    required: false
+    default: "git"
+  checkout-persist-credentials:
+    description: "Whether to configure the token or SSH key with the local git config"
+    required: false
+    default: "true"
+  checkout-path:
+    description: "Relative path under $GITHUB_WORKSPACE to place the repository"
+    required: false
+    default: ""
+  checkout-clean:
+    description: >-
+      Whether to execute git clean -ffdx && git reset --hard HEAD before
+      fetching.
+    required: false
+    default: "true"
+  checkout-filter:
+    description: >-
+      Partially clone against a given filter. Overrides sparse-checkout if set.
+    required: false
+    default: ""
+  checkout-sparse-checkout:
+    description: >-
+      Do a sparse checkout on given patterns. Each pattern should be separated
+      with new lines.
+    required: false
+    default: ""
+  checkout-sparse-checkout-cone-mode:
+    description: "Whether to use cone-mode when doing a sparse checkout."
+    required: false
+    default: "true"
+  checkout-fetch-depth:
+    description: >-
+      Number of commits to fetch. 0 indicates all history for all branches and
+      tags. Ignored when baseline-rev is set.
+    required: false
+    default: "1"
+  checkout-fetch-tags:
+    description: "Whether to fetch tags, even if fetch-depth is greater than 0."
+    required: false
+    default: "false"
+  checkout-show-progress:
+    description: "Whether to show progress status output when fetching."
+    required: false
+    default: "true"
+  checkout-lfs:
+    description: "Whether to download Git-LFS files"
+    required: false
+    default: "false"
+  checkout-submodules:
+    description: >-
+      Whether to checkout submodules: true to checkout submodules or recursive
+      to recursively checkout submodules.
+    required: false
+    default: "false"
+  checkout-set-safe-directory:
+    description: >-
+      Add repository path as safe.directory for Git global config by running
+      git config --global --add safe.directory.
+    required: false
+    default: "true"
+  checkout-github-server-url:
+    description: >-
+      Base URL for the GitHub instance to clone from. Uses environment defaults
+      unless specified. Example: https://github.com or
+      https://my-ghes-server.example.com
+    required: false
+    default: ""
+
+  # ── Rust toolchain (actions-rust-lang/setup-rust-toolchain) ─
+  install-rust-toolchain:
+    description: "Whether to install the requested Rust toolchain before running semver checks"
+    required: false
+    default: "true"
+  rust-toolchain:
+    description: "Rust toolchain to install and use before invoking cargo-semver-checks"
+    required: false
+    default: "stable"
+  rust-target:
+    description: "Rust target to install and use"
+    required: false
+    default: ""
+
+  # ── Rust cache (Swatinem/rust-cache) ────────────────────────
+  setup-rust-cache:
+    description: "Whether to restore/save Swatinem rust-cache before invoking cargo-semver-checks"
+    required: false
+    default: "true"
+  rust-cache-key-suffix:
+    description: "Extra suffix to isolate rust-cache between semver surfaces"
+    required: false
+    default: ""
+  cache-all-crates:
+    description: "Whether rust-cache should cache all crates"
+    required: false
+    default: "true"
+  cache-targets:
+    description: "Whether rust-cache should cache target directories"
+    required: false
+    default: "true"
+  cache-workspace-crates:
+    description: "Whether rust-cache should cache workspace crates"
+    required: false
+    default: "false"
+  cache-bin:
+    description: "Whether rust-cache should cache ~/.cargo/bin"
+    required: false
+    default: "true"
+  cache-on-failure:
+    description: "Whether rust-cache should save the cache after a failed run"
+    required: false
+    default: "true"
+
+  # ── Passthrough to cargo-semver-checks-action ───────────────
+  manifest-path:
+    description: "Path to Cargo.toml of crate or workspace to check"
+    required: false
+    default: ""
+  package:
+    description: >-
+      Comma-separated list of packages to check. If empty, all packages from
+      the manifest are considered after filtering.
+    required: false
+    default: ""
+  exclude:
+    description: >-
+      Comma-separated list of packages to exclude. Has effect only when
+      package is empty.
+    required: false
+    default: ""
+  feature-group:
+    description: >-
+      Feature group for semver checking. Supported values are all-features,
+      default-features, and only-explicit-features.
+    required: false
+    default: ""
+  features:
+    description: "Comma-separated list of crate features to explicitly enable"
+    required: false
+    default: ""
+  verbose:
+    description: "Enables verbose output of cargo-semver-checks"
+    required: false
+    default: "false"
+  release-type:
+    description: "Override the release type instead of deriving it from Cargo.toml"
+    required: false
+    default: ""
+  shared-key:
+    description: >-
+      Shared cache key passed through to the upstream action. Do not reuse it
+      across different targets.
+    required: false
+    default: ""
+  prefix-key:
+    description: "Additional prefix for the upstream rustdoc cache key"
+    required: false
+    default: ""
+  github-token:
+    description: "GitHub token used by the upstream action for downloading prebuilt binaries"
+    required: false
+    default: ${{ github.token }}
+  baseline-version:
+    description: "Version from registry to look up as a baseline"
+    required: false
+    default: ""
+  baseline-rev:
+    description: "Git revision, branch, or tag to use as a baseline"
+    required: false
+    default: ""
+  baseline-root:
+    description: "Directory containing baseline crate source"
+    required: false
+    default: ""
+
+outputs:
+  did-run:
+    description: "true when the upstream semver action was invoked"
+    value: ${{ steps.filter.outputs.did_run }}
+  effective-packages:
+    description: "Comma-separated package list selected for semver checks"
+    value: ${{ steps.filter.outputs.effective_packages }}
+  skipped-packages:
+    description: "Comma-separated package list skipped before execution"
+    value: ${{ steps.filter.outputs.skipped_packages }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Checkout repository
+      if: inputs.use-checkout == 'true' && inputs.baseline-rev == ''
+      uses: actions/checkout@v6
+      with:
+        repository: ${{ inputs.checkout-repository }}
+        ref: ${{ inputs.checkout-ref }}
+        token: ${{ inputs.checkout-token }}
+        ssh-key: ${{ inputs.checkout-ssh-key }}
+        ssh-known-hosts: ${{ inputs.checkout-ssh-known-hosts }}
+        ssh-strict: ${{ inputs.checkout-ssh-strict }}
+        ssh-user: ${{ inputs.checkout-ssh-user }}
+        persist-credentials: ${{ inputs.checkout-persist-credentials }}
+        path: ${{ inputs.checkout-path }}
+        clean: ${{ inputs.checkout-clean }}
+        filter: ${{ inputs.checkout-filter }}
+        sparse-checkout: ${{ inputs.checkout-sparse-checkout }}
+        sparse-checkout-cone-mode: ${{ inputs.checkout-sparse-checkout-cone-mode }}
+        fetch-depth: ${{ inputs.checkout-fetch-depth }}
+        fetch-tags: ${{ inputs.checkout-fetch-tags }}
+        show-progress: ${{ inputs.checkout-show-progress }}
+        lfs: ${{ inputs.checkout-lfs }}
+        submodules: ${{ inputs.checkout-submodules }}
+        set-safe-directory: ${{ inputs.checkout-set-safe-directory }}
+        github-server-url: ${{ inputs.checkout-github-server-url }}
+
+    - name: Checkout repository with full history
+      if: inputs.use-checkout == 'true' && inputs.baseline-rev != ''
+      uses: actions/checkout@v6
+      with:
+        repository: ${{ inputs.checkout-repository }}
+        ref: ${{ inputs.checkout-ref }}
+        token: ${{ inputs.checkout-token }}
+        ssh-key: ${{ inputs.checkout-ssh-key }}
+        ssh-known-hosts: ${{ inputs.checkout-ssh-known-hosts }}
+        ssh-strict: ${{ inputs.checkout-ssh-strict }}
+        ssh-user: ${{ inputs.checkout-ssh-user }}
+        persist-credentials: ${{ inputs.checkout-persist-credentials }}
+        path: ${{ inputs.checkout-path }}
+        clean: ${{ inputs.checkout-clean }}
+        filter: ${{ inputs.checkout-filter }}
+        sparse-checkout: ${{ inputs.checkout-sparse-checkout }}
+        sparse-checkout-cone-mode: ${{ inputs.checkout-sparse-checkout-cone-mode }}
+        fetch-depth: 0
+        fetch-tags: ${{ inputs.checkout-fetch-tags }}
+        show-progress: ${{ inputs.checkout-show-progress }}
+        lfs: ${{ inputs.checkout-lfs }}
+        submodules: ${{ inputs.checkout-submodules }}
+        set-safe-directory: ${{ inputs.checkout-set-safe-directory }}
+        github-server-url: ${{ inputs.checkout-github-server-url }}
+
+    - name: Normalize cache key inputs
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        sanitize() {
+          printf '%s' "$1" | tr ', /:\\' '------' | tr -cd '[:alnum:]_.-'
+        }
+
+        manifest="${{ inputs.manifest-path }}"
+        if [ -z "$manifest" ]; then
+          manifest="workspace-root"
+        fi
+
+        feature_group="${{ inputs.feature-group }}"
+        if [ -z "$feature_group" ]; then
+          feature_group="auto"
+        fi
+
+        features="${{ inputs.features }}"
+        if [ -z "$features" ]; then
+          features="no-features"
+        fi
+
+        packages="${{ inputs.package }}"
+        if [ -z "$packages" ]; then
+          packages="all-packages"
+        fi
+
+        exclude="${{ inputs.exclude }}"
+        if [ -z "$exclude" ]; then
+          exclude="no-excludes"
+        fi
+
+        target="${{ inputs.rust-target }}"
+        if [ -z "$target" ]; then
+          target="host-target"
+        fi
+
+        suffix="${{ inputs.rust-cache-key-suffix }}"
+        if [ -z "$suffix" ]; then
+          suffix="default"
+        fi
+
+        echo "SAFE_MANIFEST=$(sanitize \"$manifest\")" >> "$GITHUB_ENV"
+        echo "SAFE_FEATURE_GROUP=$(sanitize \"$feature_group\")" >> "$GITHUB_ENV"
+        echo "SAFE_FEATURES=$(sanitize \"$features\")" >> "$GITHUB_ENV"
+        echo "SAFE_PACKAGES=$(sanitize \"$packages\")" >> "$GITHUB_ENV"
+        echo "SAFE_EXCLUDE=$(sanitize \"$exclude\")" >> "$GITHUB_ENV"
+        echo "SAFE_TARGET=$(sanitize \"$target\")" >> "$GITHUB_ENV"
+        echo "SAFE_CACHE_SUFFIX=$(sanitize \"$suffix\")" >> "$GITHUB_ENV"
+
+    - name: Install Rust toolchain
+      if: inputs.install-rust-toolchain == 'true'
+      uses: actions-rust-lang/setup-rust-toolchain@v1
+      with:
+        toolchain: ${{ inputs.rust-toolchain }}
+        target: ${{ inputs.rust-target }}
+        cache: false
+
+    - name: Setup Rust cache
+      if: inputs.setup-rust-cache == 'true'
+      # This cache covers normal Cargo state only. Baseline rustdoc caching stays in
+      # the upstream action because its key already includes rustc version,
+      # cargo-semver-checks version, and lockfile state.
+      # Proof:
+      # https://github.com/obi1kenobi/cargo-semver-checks-action/blob/af8d009e4808912e00129e9334b6c7b117d92a2b/README.md#customizing-baseline-rustdoc-caching-strategy
+      # https://github.com/Swatinem/rust-cache/blob/f51f967e158417aafa338a1e46ab22095f07aa01/README.md
+      uses: Swatinem/rust-cache@v2
+      with:
+        key: >-
+          semver-${{ inputs.rust-toolchain }}-${{ env.SAFE_MANIFEST }}-
+          ${{ env.SAFE_TARGET }}-${{ env.SAFE_FEATURE_GROUP }}-
+          ${{ env.SAFE_FEATURES }}-${{ env.SAFE_PACKAGES }}-
+          ${{ env.SAFE_EXCLUDE }}-${{ env.SAFE_CACHE_SUFFIX }}
+        cache-all-crates: ${{ inputs.cache-all-crates }}
+        cache-targets: ${{ inputs.cache-targets }}
+        cache-workspace-crates: ${{ inputs.cache-workspace-crates }}
+        cache-bin: ${{ inputs.cache-bin }}
+        cache-on-failure: ${{ inputs.cache-on-failure }}
+
+    - name: Resolve packages to check
+      id: filter
+      shell: bash
+      run: python3 "${{ github.action_path }}/scripts/filter_packages.py"
+      env:
+        GITHUB_ACTION_PATH: ${{ github.action_path }}
+        INPUT_MANIFEST_PATH: ${{ inputs.manifest-path }}
+        INPUT_PACKAGE: ${{ inputs.package }}
+        INPUT_EXCLUDE: ${{ inputs.exclude }}
+        INPUT_SKIP_UNPUBLISHED: ${{ inputs.skip-unpublished }}
+        INPUT_BASELINE_VERSION: ${{ inputs.baseline-version }}
+        INPUT_BASELINE_REV: ${{ inputs.baseline-rev }}
+        INPUT_BASELINE_ROOT: ${{ inputs.baseline-root }}
+
+    - name: Run cargo-semver-checks
+      if: steps.filter.outputs.did_run == 'true' && inputs.filter-only != 'true'
+      # We install the toolchain in this wrapper, then force the upstream action to
+      # reuse it via `manual` so we do not double-install Rust in the same job.
+      uses: obi1kenobi/cargo-semver-checks-action@v2
+      with:
+        package: ${{ steps.filter.outputs.effective_packages }}
+        exclude: ${{ inputs.exclude }}
+        manifest-path: ${{ inputs.manifest-path }}
+        feature-group: ${{ inputs.feature-group }}
+        features: ${{ inputs.features }}
+        verbose: ${{ inputs.verbose }}
+        release-type: ${{ inputs.release-type }}
+        rust-toolchain: manual
+        rust-target: ${{ inputs.rust-target }}
+        shared-key: ${{ inputs.shared-key }}
+        prefix-key: ${{ inputs.prefix-key }}
+        github-token: ${{ inputs.github-token }}
+        baseline-version: ${{ inputs.baseline-version }}
+        baseline-rev: ${{ inputs.baseline-rev }}
+        baseline-root: ${{ inputs.baseline-root }}
+
+    - name: Report filter-only result
+      if: steps.filter.outputs.did_run == 'true' && inputs.filter-only == 'true'
+      shell: bash
+      run: |
+        echo "Filter-only mode selected."
+        echo "Effective packages: ${{ steps.filter.outputs.effective_packages }}"

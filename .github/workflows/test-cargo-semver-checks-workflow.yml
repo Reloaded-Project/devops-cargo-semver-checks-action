@@ -1,0 +1,196 @@
+name: Test Cargo Semver Checks Workflow
+
+on:
+  schedule:
+    - cron: "0 1 * * *"
+  workflow_dispatch:
+  pull_request:
+    branches: [v1-master]
+    paths:
+      - "action.yml"
+      - "README.MD"
+      - ".github/workflows/test-cargo-semver-checks-workflow.yml"
+      - "scripts/**"
+      - "tests/fixtures/**"
+
+jobs:
+  test-publication-filter:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: auto-discovery skips unpublished and private crates
+            package: ""
+            exclude: ""
+            skip_unpublished: "true"
+            expected_effective: "serde,anyhow"
+            expected_skipped: >-
+              definitely-not-a-real-crate-for-semver-action-tests,
+              private-no-publish
+
+          - name: exclude trims published list
+            package: ""
+            exclude: "anyhow"
+            skip_unpublished: "true"
+            expected_effective: "serde"
+            expected_skipped: >-
+              private-no-publish,
+              definitely-not-a-real-crate-for-semver-action-tests
+
+          - name: explicit package keeps only published member
+            package: "serde"
+            exclude: ""
+            skip_unpublished: "true"
+            expected_effective: "serde"
+            expected_skipped: ""
+
+    steps:
+      - name: Checkout Action Repository
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          cache: false
+
+      - name: Run wrapper against fixture workspace
+        id: semver
+        uses: ./
+        with:
+          manifest-path: tests/fixtures/publication-filter-workspace/Cargo.toml
+          package: ${{ matrix.package }}
+          exclude: ${{ matrix.exclude }}
+          skip-unpublished: ${{ matrix.skip_unpublished }}
+          use-checkout: false
+          install-rust-toolchain: false
+          setup-rust-cache: false
+          filter-only: true
+
+      - name: Assert filtered package outputs
+        shell: bash
+        env:
+          EXPECTED_EFFECTIVE: ${{ matrix.expected_effective }}
+          EXPECTED_SKIPPED: ${{ matrix.expected_skipped }}
+          ACTUAL_EFFECTIVE: ${{ steps.semver.outputs.effective-packages }}
+          ACTUAL_SKIPPED: ${{ steps.semver.outputs.skipped-packages }}
+        run: python3 tests/assert_package_outputs.py
+
+  test-skip-when-no-published-packages:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Action Repository
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          cache: false
+
+      - name: Skip cleanly when nothing remains
+        id: semver
+        uses: ./
+        with:
+          manifest-path: tests/fixtures/publication-filter-workspace/Cargo.toml
+          package: definitely-not-a-real-crate-for-semver-action-tests,private-no-publish
+          skip-unpublished: true
+          use-checkout: false
+          install-rust-toolchain: false
+          setup-rust-cache: false
+          filter-only: true
+
+      - name: Assert wrapper skipped successfully
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${{ steps.semver.outputs.did-run }}" = "false"
+          test -z "${{ steps.semver.outputs.effective-packages }}"
+          skipped="${{ steps.semver.outputs.skipped-packages }}"
+          case ",$skipped," in
+            *,definitely-not-a-real-crate-for-semver-action-tests,*) ;;
+            *)
+              echo "Missing unpublished crate from skipped list"
+              exit 1
+              ;;
+          esac
+          case ",$skipped," in
+            *,private-no-publish,*) ;;
+            *)
+              echo "Missing private crate from skipped list"
+              exit 1
+              ;;
+          esac
+
+  test-baseline-bypasses-publication-filter:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Action Repository
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          cache: false
+
+      - name: Keep unpublished package when baseline is explicit
+        id: semver
+        uses: ./
+        with:
+          manifest-path: tests/fixtures/publication-filter-workspace/Cargo.toml
+          package: definitely-not-a-real-crate-for-semver-action-tests
+          skip-unpublished: true
+          use-checkout: false
+          install-rust-toolchain: false
+          setup-rust-cache: false
+          filter-only: true
+          baseline-root: tests/fixtures/publication-filter-workspace/unpublished-local
+
+      - name: Assert baseline disabled filtering
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${{ steps.semver.outputs.did-run }}" = "true"
+          test \
+            "${{ steps.semver.outputs.effective-packages }}" = \
+            "definitely-not-a-real-crate-for-semver-action-tests"
+          test -z "${{ steps.semver.outputs.skipped-packages }}"
+
+  test-repeated-calls:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Action Repository
+        uses: actions/checkout@v6
+
+      - name: First call with setup
+        id: first
+        uses: ./
+        with:
+          manifest-path: tests/fixtures/publication-filter-workspace/Cargo.toml
+          package: serde
+          use-checkout: false
+          install-rust-toolchain: true
+          setup-rust-cache: true
+          baseline-root: tests/fixtures/publication-filter-workspace/published-serde
+          rust-cache-key-suffix: first
+
+      - name: Second call without setup
+        id: second
+        uses: ./
+        with:
+          manifest-path: tests/fixtures/publication-filter-workspace/Cargo.toml
+          package: anyhow
+          use-checkout: false
+          install-rust-toolchain: false
+          setup-rust-cache: false
+          baseline-root: tests/fixtures/publication-filter-workspace/published-anyhow
+          rust-cache-key-suffix: second
+
+      - name: Assert repeated calls succeeded
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${{ steps.first.outputs.did-run }}" = "true"
+          test "${{ steps.second.outputs.did-run }}" = "true"

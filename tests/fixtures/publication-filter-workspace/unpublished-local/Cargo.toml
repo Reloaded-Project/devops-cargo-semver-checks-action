@@ -1,0 +1,8 @@
+[package]
+name = "definitely-not-a-real-crate-for-semver-action-tests"
+version = "0.1.0"
+edition = "2021"
+publish = true
+
+[lib]
+path = "src/lib.rs"
