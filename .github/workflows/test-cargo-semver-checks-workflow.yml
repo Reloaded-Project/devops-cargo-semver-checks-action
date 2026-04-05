@@ -192,3 +192,5 @@ jobs:
           set -euo pipefail
           test "${{ steps.first.outputs.did-run }}" = "true"
           test "${{ steps.second.outputs.did-run }}" = "true"
+          test "${{ steps.first.outputs.rust-cache-workspaces }}" = "tests/fixtures/publication-filter-workspace -> ../../../semver-checks/target"
+          test "${{ steps.second.outputs.rust-cache-workspaces }}" = "tests/fixtures/publication-filter-workspace -> ../../../semver-checks/target"

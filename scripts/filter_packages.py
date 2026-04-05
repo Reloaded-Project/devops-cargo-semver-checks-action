@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Resolve which workspace packages should be passed to cargo-semver-checks.
 
-Reads action inputs from environment variables, runs ``cargo metadata``, then
-filters packages through several steps to produce the final list of effective
-and skipped packages. Results are written to ``GITHUB_OUTPUT``.
+Reads action inputs, runs ``cargo metadata``, filters packages, and writes
+outputs for package selection and ``rust-cache`` workspace mapping.
 
 # Environment variables
 - ``INPUT_MANIFEST_PATH``: Optional path to a ``Cargo.toml`` manifest.
@@ -61,11 +60,13 @@ class CargoPackage:
 class CargoMetadata:
     workspace_members: list[str]
     packages: list[CargoPackage]
+    workspace_root: str = ""
 
 
 def main() -> int:
     inputs = _read_inputs()
     metadata = _cargo_metadata(inputs.manifest_path)
+    rust_cache_workspaces = _rust_cache_workspaces(metadata)
 
     packages = _parse_csv(inputs.package_input)
     excludes = _parse_csv(inputs.exclude_input)
@@ -101,6 +102,7 @@ def main() -> int:
                 "did_run=false",
                 "effective_packages=",
                 f"skipped_packages={skipped_csv}",
+                f"rust_cache_workspaces={rust_cache_workspaces}",
             ],
         )
         return 0
@@ -115,6 +117,7 @@ def main() -> int:
             "did_run=true",
             f"effective_packages={effective_csv}",
             f"skipped_packages={skipped_csv}",
+            f"rust_cache_workspaces={rust_cache_workspaces}",
         ],
     )
     return 0
@@ -158,7 +161,36 @@ def _cargo_metadata(manifest_path: str) -> CargoMetadata:
         )
         for pkg in raw["packages"]
     ]
-    return CargoMetadata(workspace_members=raw["workspace_members"], packages=packages)
+    return CargoMetadata(
+        workspace_members=raw["workspace_members"],
+        packages=packages,
+        workspace_root=raw.get("workspace_root", ""),
+    )
+
+
+def _rust_cache_workspaces(metadata: CargoMetadata) -> str:
+    """Return the ``rust-cache`` ``workspaces`` entry for semver runs.
+
+    The upstream action writes current-build artifacts to
+    ``$GITHUB_WORKSPACE/semver-checks/target``. This maps ``rust-cache`` to
+    that directory.
+
+    # Returns
+    - A ``workspaces`` entry in the form ``workspace -> target``.
+    """
+    github_workspace = os.path.realpath(os.environ.get("GITHUB_WORKSPACE", os.getcwd()))
+    # Use the real workspace root so nested workspaces map correctly.
+    workspace_root = os.path.realpath(metadata.workspace_root or github_workspace)
+    semver_target_root = os.path.join(github_workspace, "semver-checks", "target")
+
+    workspace_rel = _relative_posix_path(workspace_root, github_workspace)
+    semver_target_rel = _relative_posix_path(semver_target_root, workspace_root)
+    return f"{workspace_rel} -> {semver_target_rel}"
+
+
+def _relative_posix_path(path: str, start: str) -> str:
+    """Return a relative path normalized to forward slashes."""
+    return os.path.relpath(path, start).replace(os.sep, "/")
 
 
 def _parse_csv(raw: str) -> list[str]:

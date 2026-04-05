@@ -1,8 +1,8 @@
 # scripts
 
 [`filter_packages.py`](filter_packages.py) resolves and filters workspace
-packages for the `cargo-semver-checks-action` wrapper before handing off to
-the upstream [cargo-semver-checks-action](https://github.com/obi1kanobi/cargo-semver-checks-action).
+packages for the wrapper before calling the upstream
+[cargo-semver-checks-action](https://github.com/obi1kanobi/cargo-semver-checks-action).
 
 ## How it works
 
@@ -10,8 +10,8 @@ the upstream [cargo-semver-checks-action](https://github.com/obi1kanobi/cargo-se
 check" step. It reads action inputs from environment variables and runs the
 following steps in order:
 
-1. Run `cargo metadata --format-version 1 --no-deps` to get the full list of
-   workspace packages.
+1. Run `cargo metadata --format-version 1 --no-deps` to list workspace
+   packages.
 2. Parse the `package` and `exclude` action inputs (comma-separated strings)
    into lists.
 3. Resolve which packages to check:
@@ -20,13 +20,14 @@ following steps in order:
      `exclude`.
    - Skip packages that don't exist in the metadata or have `publish = false`.
 4. Optionally filter out unpublished crates:
-   - Query the crates.io sparse index for each remaining package.
-   - Move packages with no non-yanked published version to the skipped list.
-   - This step is skipped when a baseline is explicitly provided
-     (`baseline-version`, `baseline-rev`, or `baseline-root`), because the
-     comparison target is already known.
-5. Write `effective_packages` and `skipped_packages` as comma-separated strings
-   to `$GITHUB_OUTPUT`.
+    - Query the crates.io sparse index for each remaining package.
+    - Move packages with no non-yanked published version to the skipped list.
+    - Skip this step when `baseline-version`, `baseline-rev`, or
+      `baseline-root` is set.
+5. Derive the `rust-cache` workspace mapping for the upstream action's
+   `semver-checks/target` directory.
+6. Write `effective_packages`, `skipped_packages`, and
+   `rust_cache_workspaces` to `$GITHUB_OUTPUT`.
 
 If no effective packages remain and `fail-if-no-published-packages` is `true`,
 the script exits with code 1. Otherwise it writes `did_run=false` and exits 0.
