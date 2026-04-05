@@ -22,6 +22,7 @@ and skipped packages. Results are written to ``GITHUB_OUTPUT``.
   packages remain after filtering.
 """
 
+from dataclasses import dataclass
 import json
 import os
 import subprocess
@@ -30,33 +31,58 @@ import urllib.error
 import urllib.request
 
 
+@dataclass
+class ActionInputs:
+    manifest_path: str
+    package_input: str
+    exclude_input: str
+    skip_unpublished: bool
+    fail_if_empty: bool
+    baseline_version: str
+    baseline_rev: str
+    baseline_root: str
+    github_output: str
+
+
+@dataclass
+class PackageList:
+    effective_packages: list[str]
+    skipped_packages: list[str]
+
+
+@dataclass
+class CargoPackage:
+    id: str
+    name: str
+    publish: list[str] | bool | None
+
+
+@dataclass
+class CargoMetadata:
+    workspace_members: list[str]
+    packages: list[CargoPackage]
+
+
 def main() -> int:
-    manifest_path = os.environ.get("INPUT_MANIFEST_PATH", "")
-    package_input = os.environ.get("INPUT_PACKAGE", "")
-    exclude_input = os.environ.get("INPUT_EXCLUDE", "")
-    skip_unpublished = os.environ.get("INPUT_SKIP_UNPUBLISHED", "true")
-    fail_if_empty = os.environ.get("INPUT_FAIL_IF_NO_PUBLISHED_PACKAGES", "false")
-    baseline_version = os.environ.get("INPUT_BASELINE_VERSION", "")
-    baseline_rev = os.environ.get("INPUT_BASELINE_REV", "")
-    baseline_root = os.environ.get("INPUT_BASELINE_ROOT", "")
-    github_output = os.environ.get("GITHUB_OUTPUT", "/dev/null")
+    inputs = _read_inputs()
+    metadata = _cargo_metadata(inputs.manifest_path)
 
-    metadata = _cargo_metadata(manifest_path)
-
-    packages = _parse_csv(package_input)
-    excludes = _parse_csv(exclude_input)
+    packages = _parse_csv(inputs.package_input)
+    excludes = _parse_csv(inputs.exclude_input)
 
     result = _resolve_packages(packages, excludes, metadata)
 
-    has_baseline = bool(baseline_version or baseline_rev or baseline_root)
-    if skip_unpublished == "true" and not has_baseline:
+    has_baseline = bool(
+        inputs.baseline_version or inputs.baseline_rev or inputs.baseline_root
+    )
+    if inputs.skip_unpublished and not has_baseline:
         result = _filter_published(result)
 
-    effective_csv = ",".join(result["effective_packages"])
-    skipped_csv = ",".join(result["skipped_packages"])
+    effective_csv = ",".join(result.effective_packages)
+    skipped_csv = ",".join(result.skipped_packages)
 
     if not effective_csv:
-        if fail_if_empty == "true":
+        if inputs.fail_if_empty:
             print("No packages remain after semver filtering.", file=sys.stderr)
             if skipped_csv:
                 print(f"Skipped packages: {skipped_csv}", file=sys.stderr)
@@ -70,7 +96,7 @@ def main() -> int:
             print(f"Skipped packages: {skipped_csv}")
 
         _write_output(
-            github_output,
+            inputs.github_output,
             [
                 "did_run=false",
                 "effective_packages=",
@@ -84,7 +110,7 @@ def main() -> int:
         print(f"Skipped packages: {skipped_csv}")
 
     _write_output(
-        github_output,
+        inputs.github_output,
         [
             "did_run=true",
             f"effective_packages={effective_csv}",
@@ -94,16 +120,22 @@ def main() -> int:
     return 0
 
 
-def _parse_csv(raw: str) -> list[str]:
-    """Split a comma-separated string into trimmed, non-empty items.
+def _read_inputs() -> ActionInputs:
+    return ActionInputs(
+        manifest_path=os.environ.get("INPUT_MANIFEST_PATH", ""),
+        package_input=os.environ.get("INPUT_PACKAGE", ""),
+        exclude_input=os.environ.get("INPUT_EXCLUDE", ""),
+        skip_unpublished=os.environ.get("INPUT_SKIP_UNPUBLISHED", "true") == "true",
+        fail_if_empty=os.environ.get("INPUT_FAIL_IF_NO_PUBLISHED_PACKAGES", "false")
+        == "true",
+        baseline_version=os.environ.get("INPUT_BASELINE_VERSION", ""),
+        baseline_rev=os.environ.get("INPUT_BASELINE_REV", ""),
+        baseline_root=os.environ.get("INPUT_BASELINE_ROOT", ""),
+        github_output=os.environ.get("GITHUB_OUTPUT", "/dev/null"),
+    )
 
-    # Arguments
-    - `raw`: Comma-separated values. Empty string produces an empty list.
-    """
-    return [item for item in (s.strip() for s in raw.split(",")) if item]
 
-
-def _cargo_metadata(manifest_path: str) -> dict:
+def _cargo_metadata(manifest_path: str) -> CargoMetadata:
     """Run ``cargo metadata`` and return the parsed JSON output.
 
     # Arguments
@@ -117,10 +149,30 @@ def _cargo_metadata(manifest_path: str) -> dict:
     if manifest_path:
         args += ["--manifest-path", manifest_path]
     result = subprocess.run(args, capture_output=True, text=True, check=True)
-    return json.loads(result.stdout)
+    raw = json.loads(result.stdout)
+    packages = [
+        CargoPackage(
+            id=pkg["id"],
+            name=pkg["name"],
+            publish=pkg.get("publish", None),
+        )
+        for pkg in raw["packages"]
+    ]
+    return CargoMetadata(workspace_members=raw["workspace_members"], packages=packages)
 
 
-def _resolve_packages(packages: list[str], excludes: list[str], metadata: dict) -> dict:
+def _parse_csv(raw: str) -> list[str]:
+    """Split a comma-separated string into trimmed, non-empty items.
+
+    # Arguments
+    - `raw`: Comma-separated values. Empty string produces an empty list.
+    """
+    return [item for item in (s.strip() for s in raw.split(",")) if item]
+
+
+def _resolve_packages(
+    packages: list[str], excludes: list[str], metadata: CargoMetadata
+) -> PackageList:
     """Determine which packages should be included for semver checking.
 
     # Arguments
@@ -129,8 +181,7 @@ def _resolve_packages(packages: list[str], excludes: list[str], metadata: dict) 
     - `metadata`: Parsed output of `cargo metadata --format-version 1`.
 
     # Returns
-    - Dict with keys `effective_packages` and `skipped_packages`, each a list
-      of package name strings.
+    - PackageList with `effective_packages` and `skipped_packages` lists.
 
     # Behavior
     - When `packages` is empty, all workspace members not in `excludes` are
@@ -140,14 +191,14 @@ def _resolve_packages(packages: list[str], excludes: list[str], metadata: dict) 
     - Duplicate package names are silently de-duplicated.
     """
     requested_excludes = set(excludes)
-    package_by_id = {pkg["id"]: pkg for pkg in metadata["packages"]}
+    package_by_id = {pkg.id: pkg for pkg in metadata.packages}
 
     if packages:
         candidates = packages
     else:
         candidates = [
-            package_by_id[pkg_id]["name"]
-            for pkg_id in metadata["workspace_members"]
+            package_by_id[pkg_id].name
+            for pkg_id in metadata.workspace_members
             if pkg_id in package_by_id
         ]
         candidates = [name for name in candidates if name not in requested_excludes]
@@ -161,37 +212,39 @@ def _resolve_packages(packages: list[str], excludes: list[str], metadata: dict) 
             continue
         seen.add(name)
 
-        pkg = next((p for p in metadata["packages"] if p["name"] == name), None)
+        pkg = next((p for p in metadata.packages if p.name == name), None)
         if pkg is None:
             skipped.append(name)
             continue
 
-        publish = pkg.get("publish", None)
-        if publish is False or publish == []:
+        if pkg.publish is False or pkg.publish == []:
             skipped.append(name)
             continue
 
         effective.append(name)
 
-    return {"effective_packages": effective, "skipped_packages": skipped}
+    return PackageList(effective_packages=effective, skipped_packages=skipped)
 
 
-def _sparse_index_path(crate: str) -> str:
-    """Compute the crates.io sparse-index path for a crate name.
+def _filter_published(payload: PackageList) -> PackageList:
+    """Remove unpublished or fully-yanked packages from the effective list.
 
     # Arguments
-    - `crate`: Crate name (non-empty string).
+    - `payload`: PackageList with `effective_packages` and `skipped_packages` lists.
 
     # Returns
-    - The relative path component used by the crates.io HTTP index.
+    - PackageList with updated `effective_packages` and `skipped_packages`.
     """
-    if len(crate) == 1:
-        return f"1/{crate}"
-    if len(crate) == 2:
-        return f"2/{crate}"
-    if len(crate) == 3:
-        return f"3/{crate[0]}/{crate}"
-    return f"{crate[:2]}/{crate[2:4]}/{crate}"
+    effective: list[str] = []
+    skipped = list(payload.skipped_packages)
+
+    for crate in payload.effective_packages:
+        if _crate_has_non_yanked_release(crate):
+            effective.append(crate)
+        else:
+            skipped.append(crate)
+
+    return PackageList(effective_packages=effective, skipped_packages=skipped)
 
 
 def _crate_has_non_yanked_release(crate: str) -> bool:
@@ -230,25 +283,22 @@ def _crate_has_non_yanked_release(crate: str) -> bool:
     return False
 
 
-def _filter_published(payload: dict) -> dict:
-    """Remove unpublished or fully-yanked packages from the effective list.
+def _sparse_index_path(crate: str) -> str:
+    """Compute the crates.io sparse-index path for a crate name.
 
     # Arguments
-    - `payload`: Dict with `effective_packages` and `skipped_packages` lists.
+    - `crate`: Crate name (non-empty string).
 
     # Returns
-    - Dict with updated `effective_packages` and `skipped_packages`.
+    - The relative path component used by the crates.io HTTP index.
     """
-    effective: list[str] = []
-    skipped = list(payload.get("skipped_packages", []))
-
-    for crate in payload.get("effective_packages", []):
-        if _crate_has_non_yanked_release(crate):
-            effective.append(crate)
-        else:
-            skipped.append(crate)
-
-    return {"effective_packages": effective, "skipped_packages": skipped}
+    if len(crate) == 1:
+        return f"1/{crate}"
+    if len(crate) == 2:
+        return f"2/{crate}"
+    if len(crate) == 3:
+        return f"3/{crate[0]}/{crate}"
+    return f"{crate[:2]}/{crate[2:4]}/{crate}"
 
 
 def _write_output(path: str, lines: list[str]) -> None:

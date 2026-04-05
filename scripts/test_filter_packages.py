@@ -23,6 +23,7 @@ from unittest.mock import MagicMock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import filter_packages
+from filter_packages import CargoMetadata, CargoPackage, PackageList
 
 
 class TestParseCsv(unittest.TestCase):
@@ -47,58 +48,58 @@ class TestParseCsv(unittest.TestCase):
 class TestResolvePackages(unittest.TestCase):
     """Tests for ``filter_packages._resolve_packages`` - discovery, selection, and exclusion."""
 
-    METADATA = {
-        "workspace_members": [
+    METADATA = CargoMetadata(
+        workspace_members=[
             "pkg-a 0.1.0 (path+file:///repo/a)",
             "pkg-b 0.1.0 (path+file:///repo/b)",
         ],
-        "packages": [
-            {
-                "id": "pkg-a 0.1.0 (path+file:///repo/a)",
-                "name": "pkg-a",
-                "publish": None,
-            },
-            {
-                "id": "pkg-b 0.1.0 (path+file:///repo/b)",
-                "name": "pkg-b",
-                "publish": False,
-            },
+        packages=[
+            CargoPackage(
+                id="pkg-a 0.1.0 (path+file:///repo/a)",
+                name="pkg-a",
+                publish=None,
+            ),
+            CargoPackage(
+                id="pkg-b 0.1.0 (path+file:///repo/b)",
+                name="pkg-b",
+                publish=False,
+            ),
         ],
-    }
+    )
 
     def test_auto_discovery_skips_unpublishable(self):
         out = filter_packages._resolve_packages([], [], self.METADATA)
-        self.assertEqual(out["effective_packages"], ["pkg-a"])
-        self.assertEqual(out["skipped_packages"], ["pkg-b"])
+        self.assertEqual(out.effective_packages, ["pkg-a"])
+        self.assertEqual(out.skipped_packages, ["pkg-b"])
 
     def test_explicit_package(self):
         out = filter_packages._resolve_packages(["pkg-a"], [], self.METADATA)
-        self.assertEqual(out["effective_packages"], ["pkg-a"])
-        self.assertEqual(out["skipped_packages"], [])
+        self.assertEqual(out.effective_packages, ["pkg-a"])
+        self.assertEqual(out.skipped_packages, [])
 
     def test_exclude(self):
         out = filter_packages._resolve_packages([], ["pkg-a"], self.METADATA)
-        self.assertEqual(out["effective_packages"], [])
-        self.assertIn("pkg-b", out["skipped_packages"])
+        self.assertEqual(out.effective_packages, [])
+        self.assertIn("pkg-b", out.skipped_packages)
 
     def test_unknown_package_skipped(self):
         out = filter_packages._resolve_packages(["nope"], [], self.METADATA)
-        self.assertEqual(out["effective_packages"], [])
-        self.assertEqual(out["skipped_packages"], ["nope"])
+        self.assertEqual(out.effective_packages, [])
+        self.assertEqual(out.skipped_packages, ["nope"])
 
     def test_deduplication(self):
         out = filter_packages._resolve_packages(["pkg-a", "pkg-a"], [], self.METADATA)
-        self.assertEqual(out["effective_packages"], ["pkg-a"])
+        self.assertEqual(out.effective_packages, ["pkg-a"])
 
     def test_empty_publish_list_skips(self):
-        metadata = {
-            "workspace_members": ["x 0.1.0 (path+file:///x)"],
-            "packages": [
-                {"id": "x 0.1.0 (path+file:///x)", "name": "x", "publish": []},
+        metadata = CargoMetadata(
+            workspace_members=["x 0.1.0 (path+file:///x)"],
+            packages=[
+                CargoPackage(id="x 0.1.0 (path+file:///x)", name="x", publish=[]),
             ],
-        }
+        )
         out = filter_packages._resolve_packages([], [], metadata)
-        self.assertEqual(out["skipped_packages"], ["x"])
+        self.assertEqual(out.skipped_packages, ["x"])
 
 
 class TestSparseIndexPath(unittest.TestCase):
@@ -131,20 +132,20 @@ class TestFilterPublished(unittest.TestCase):
             filter_packages, "_crate_has_non_yanked_release", return_value=False
         ):
             out = filter_packages._filter_published(
-                {"effective_packages": ["fake-crate"], "skipped_packages": []}
+                PackageList(effective_packages=["fake-crate"], skipped_packages=[])
             )
-        self.assertEqual(out["effective_packages"], [])
-        self.assertEqual(out["skipped_packages"], ["fake-crate"])
+        self.assertEqual(out.effective_packages, [])
+        self.assertEqual(out.skipped_packages, ["fake-crate"])
 
     def test_keeps_published(self):
         with patch.object(
             filter_packages, "_crate_has_non_yanked_release", return_value=True
         ):
             out = filter_packages._filter_published(
-                {"effective_packages": ["serde"], "skipped_packages": []}
+                PackageList(effective_packages=["serde"], skipped_packages=[])
             )
-        self.assertEqual(out["effective_packages"], ["serde"])
-        self.assertEqual(out["skipped_packages"], [])
+        self.assertEqual(out.effective_packages, ["serde"])
+        self.assertEqual(out.skipped_packages, [])
 
 
 CARGO_METADATA_STUB = json.dumps(
