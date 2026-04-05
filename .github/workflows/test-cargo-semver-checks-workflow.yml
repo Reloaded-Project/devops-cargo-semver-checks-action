@@ -26,8 +26,7 @@ jobs:
             skip_unpublished: "true"
             expected_effective: "serde,anyhow"
             expected_skipped: >-
-              definitely-not-a-real-crate-for-semver-action-tests,
-              private-no-publish
+              definitely-not-a-real-crate-for-semver-action-tests, private-no-publish
 
           - name: exclude trims published list
             package: ""
@@ -35,8 +34,7 @@ jobs:
             skip_unpublished: "true"
             expected_effective: "serde"
             expected_skipped: >-
-              private-no-publish,
-              definitely-not-a-real-crate-for-semver-action-tests
+              private-no-publish, definitely-not-a-real-crate-for-semver-action-tests
 
           - name: explicit package keeps only published member
             package: "serde"
