@@ -16,22 +16,22 @@
 
 This action wraps `obi1kenobi/cargo-semver-checks-action` with three extras:
 
-- built-in `actions/checkout`
+- Built-in `actions/checkout`
 - `Swatinem/rust-cache` for Cargo caching
-- skips unpublished crates so new workspaces work out of the box
+- Skips unpublished crates so new workspaces work out of the box
 
 Intended for Rust workspaces that want the upstream semver checker with
 predictable caching and support for unpublished crates.
 
 ## Features
 
-- wraps `actions/checkout@v6`
-- runs the official `cargo-semver-checks` action
-- installs and reuses a Rust toolchain by default
-- restores Cargo registry, git, and `target/` caches with `rust-cache`
-- skips `publish = false` crates automatically
-- skips unpublished crates by default
-- exposes filtered package lists as action outputs
+- Wraps `actions/checkout@v6`
+- Runs the official `cargo-semver-checks` action
+- Installs and reuses a Rust toolchain by default
+- Restores Cargo registry, git, and `target/` caches with `rust-cache`
+- Skips `publish = false` crates automatically
+- Skips unpublished crates by default
+- Exposes filtered package lists as action outputs
 
 ## Usage
 
@@ -218,12 +218,12 @@ To see what would be checked without running semver checks, set
 
 The repository includes fixture-based workflow tests that cover:
 
-- workspace auto-discovery
+- Workspace auto-discovery
 - `exclude`
-- skipping unpublished crates
-- failing when no published crates remain
-- explicit baseline bypass
-- matrix-friendly output assertions
+- Skipping unpublished crates
+- Failing when no published crates remain
+- Explicit baseline bypass
+- Matrix-friendly output assertions
 
 ## License
 
