@@ -18,18 +18,19 @@ This action wraps `obi1kenobi/cargo-semver-checks-action` with three extras:
 
 - Built-in `actions/checkout`
 - `Swatinem/rust-cache` for Cargo caching
-- Skips unpublished crates so new workspaces work out of the box
+- Skips unpublished crates so new workspaces do not fail
 
-Intended for Rust workspaces that want the upstream semver checker with
-predictable caching and support for unpublished crates.
+Intended for Rust workspaces that want the upstream semver checker with cache
+setup and unpublished-crate filtering.
 
 ## Features
 
 - Wraps `actions/checkout@v6`
 - Runs the official `cargo-semver-checks` action
 - Installs and reuses a Rust toolchain by default
-- Restores Cargo registry, git, and `target/` caches with `rust-cache`
-- Skips `publish = false` crates automatically
+- Restores Cargo registry, git, and semver build artifacts with `rust-cache`
+- Derives the Cargo workspace root from `manifest-path` when needed
+- Skips `publish = false` crates
 - Skips unpublished crates by default
 - Exposes filtered package lists as action outputs
 
@@ -141,7 +142,7 @@ All inputs are prefixed with `checkout-` and forwarded directly. When
 | `rust-cache-key-suffix`  | `''`    | Isolates rust-cache per semver surface  |
 | `cache-all-crates`       | `true`  | Cache all crates, not just dependencies |
 | `cache-targets`          | `true`  | Cache `target/` directories             |
-| `cache-workspace-crates` | `false` | Cache workspace crates                  |
+| `cache-workspace-crates` | `true`  | Cache workspace crates                  |
 | `cache-bin`              | `true`  | Cache `~/.cargo/bin`                    |
 | `cache-on-failure`       | `true`  | Save cache even after a failed run      |
 
@@ -164,7 +165,7 @@ All inputs are prefixed with `checkout-` and forwarded directly. When
 | `baseline-root`    | `''`                  | Explicit baseline directory               |
 
 `feature-group` controls which features are enabled for semver analysis.
-See the [upstream docs][upstream-readme] for details.
+See the [upstream docs][upstream-readme].
 
 | Value                    | Behavior                               |
 | ------------------------ | -------------------------------------- |
@@ -172,26 +173,37 @@ See the [upstream docs][upstream-readme] for details.
 | `default-features`       | Use only default features              |
 | `only-explicit-features` | Enable **only** features in `features` |
 
-When empty, defaults to `default-features`. Set it explicitly for
-self-documenting matrix rows.
+When empty, it defaults to `default-features`. Set it explicitly if you want
+matrix rows to be clearer.
 
 ## Outputs
 
-| Output               | Meaning                                               |
-| -------------------- | ----------------------------------------------------- |
-| `did-run`            | `true` if the upstream action was invoked             |
-| `effective-packages` | Comma-separated package list selected for checking    |
-| `skipped-packages`   | Comma-separated package list skipped before execution |
+| Output                  | Meaning                                               |
+| ----------------------- | ----------------------------------------------------- |
+| `did-run`               | `true` if the upstream action was invoked             |
+| `effective-packages`    | Comma-separated package list selected for checking    |
+| `skipped-packages`      | Comma-separated package list skipped before execution |
+| `rust-cache-workspaces` | Workspace mapping passed to `Swatinem/rust-cache`     |
 
 ## Caching Strategy
 
-This action uses two separate caches:
+This action uses two caches:
 
-1. `Swatinem/rust-cache` for Cargo registry, git dependencies, and `target/`
-2. The upstream action's built-in rustdoc cache
+| Cache                 | Purpose                                                       |
+| --------------------- | ------------------------------------------------------------- |
+| Upstream cache        | Baseline rustdocs                                             |
+| `Swatinem/rust-cache` | Current-build artifacts, Cargo registry, and git dependencies |
 
-They solve different problems and remain separate. The upstream cache handles
-baseline rustdocs automatically.
+The upstream action writes current-build artifacts to:
+
+```text
+$GITHUB_WORKSPACE/semver-checks/target
+```
+
+This wrapper points `rust-cache` at that directory.
+
+It also enables `cache-workspace-crates` by default because semver checks
+rebuild workspace crates repeatedly.
 
 **Note:** `shared-key` must not be reused across different semver targets
 (keep it target-specific).

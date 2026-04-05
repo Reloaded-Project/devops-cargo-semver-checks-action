@@ -165,7 +165,7 @@ inputs:
   cache-workspace-crates:
     description: "Whether rust-cache should cache workspace crates"
     required: false
-    default: "false"
+    default: "true"
   cache-bin:
     description: "Whether rust-cache should cache ~/.cargo/bin"
     required: false
@@ -247,6 +247,9 @@ outputs:
   skipped-packages:
     description: "Comma-separated package list skipped before execution"
     value: ${{ steps.filter.outputs.skipped_packages }}
+  rust-cache-workspaces:
+    description: "Workspace mapping passed to Swatinem/rust-cache"
+    value: ${{ steps.filter.outputs.rust_cache_workspaces }}
 
 runs:
   using: "composite"
@@ -361,12 +364,31 @@ runs:
         target: ${{ inputs.rust-target }}
         cache: false
 
+    - name: Resolve packages to check
+      id: filter
+      shell: bash
+      run: python3 "${{ github.action_path }}/scripts/filter_packages.py"
+      env:
+        GITHUB_ACTION_PATH: ${{ github.action_path }}
+        INPUT_MANIFEST_PATH: ${{ inputs.manifest-path }}
+        INPUT_PACKAGE: ${{ inputs.package }}
+        INPUT_EXCLUDE: ${{ inputs.exclude }}
+        INPUT_SKIP_UNPUBLISHED: ${{ inputs.skip-unpublished }}
+        INPUT_BASELINE_VERSION: ${{ inputs.baseline-version }}
+        INPUT_BASELINE_REV: ${{ inputs.baseline-rev }}
+        INPUT_BASELINE_ROOT: ${{ inputs.baseline-root }}
+
     - name: Setup Rust cache
-      if: inputs.setup-rust-cache == 'true'
-      # This cache covers normal Cargo state only. Baseline rustdoc caching stays in
-      # the upstream action because its key already includes rustc version,
-      # cargo-semver-checks version, and lockfile state.
-      # Proof:
+      if: >-
+        inputs.setup-rust-cache == 'true' &&
+        steps.filter.outputs.did_run == 'true' &&
+        inputs.filter-only != 'true'
+      # Cache split:
+      # - Upstream action: baseline rustdocs
+      # - This wrapper: rust-cache for current-build artifacts
+      #
+      # The upstream action writes current-build artifacts to
+      # GITHUB_WORKSPACE/semver-checks/target, so rust-cache must point there.
       # https://github.com/obi1kenobi/cargo-semver-checks-action/blob/af8d009e4808912e00129e9334b6c7b117d92a2b/README.md#customizing-baseline-rustdoc-caching-strategy
       # https://github.com/Swatinem/rust-cache/blob/f51f967e158417aafa338a1e46ab22095f07aa01/README.md
       uses: Swatinem/rust-cache@v2
@@ -381,20 +403,7 @@ runs:
         cache-workspace-crates: ${{ inputs.cache-workspace-crates }}
         cache-bin: ${{ inputs.cache-bin }}
         cache-on-failure: ${{ inputs.cache-on-failure }}
-
-    - name: Resolve packages to check
-      id: filter
-      shell: bash
-      run: python3 "${{ github.action_path }}/scripts/filter_packages.py"
-      env:
-        GITHUB_ACTION_PATH: ${{ github.action_path }}
-        INPUT_MANIFEST_PATH: ${{ inputs.manifest-path }}
-        INPUT_PACKAGE: ${{ inputs.package }}
-        INPUT_EXCLUDE: ${{ inputs.exclude }}
-        INPUT_SKIP_UNPUBLISHED: ${{ inputs.skip-unpublished }}
-        INPUT_BASELINE_VERSION: ${{ inputs.baseline-version }}
-        INPUT_BASELINE_REV: ${{ inputs.baseline-rev }}
-        INPUT_BASELINE_ROOT: ${{ inputs.baseline-root }}
+        workspaces: ${{ steps.filter.outputs.rust_cache_workspaces }}
 
     - name: Run cargo-semver-checks
       if: steps.filter.outputs.did_run == 'true' && inputs.filter-only != 'true'

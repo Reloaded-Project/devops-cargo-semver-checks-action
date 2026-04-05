@@ -148,6 +148,58 @@ class TestFilterPublished(unittest.TestCase):
         self.assertEqual(out.skipped_packages, [])
 
 
+class TestRustCacheWorkspaces(unittest.TestCase):
+    """Tests for rust-cache workspace mapping derived from cargo metadata."""
+
+    def test_nested_workspace_points_at_semver_target(self):
+        metadata = CargoMetadata(
+            workspace_members=[],
+            packages=[],
+            workspace_root="/repo/src",
+        )
+
+        with patch.dict(
+            os.environ,
+            {"GITHUB_WORKSPACE": "/repo"},
+            clear=False,
+        ):
+            self.assertEqual(
+                filter_packages._rust_cache_workspaces(metadata),
+                "src -> ../semver-checks/target",
+            )
+
+    def test_repo_root_workspace_points_at_semver_target(self):
+        metadata = CargoMetadata(
+            workspace_members=[],
+            packages=[],
+            workspace_root="/repo",
+        )
+
+        with patch.dict(
+            os.environ,
+            {"GITHUB_WORKSPACE": "/repo"},
+            clear=False,
+        ):
+            self.assertEqual(
+                filter_packages._rust_cache_workspaces(metadata),
+                ". -> semver-checks/target",
+            )
+
+    def test_falls_back_to_current_directory_without_github_workspace(self):
+        metadata = CargoMetadata(
+            workspace_members=[],
+            packages=[],
+            workspace_root="/tmp/project/workspace",
+        )
+
+        with patch.dict(os.environ, {}, clear=True):
+            with patch("os.getcwd", return_value="/tmp/project"):
+                self.assertEqual(
+                    filter_packages._rust_cache_workspaces(metadata),
+                    "workspace -> ../semver-checks/target",
+                )
+
+
 CARGO_METADATA_STUB = json.dumps(
     {
         "workspace_members": [
